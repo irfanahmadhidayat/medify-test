@@ -13,6 +13,17 @@
                 <div class="card-body">
                     <table>
                         <tr>
+                            <th>Foto</th>
+                            <td>:</td>
+                            <td>
+                                @if($data->foto != '')
+                                <img src="{{asset('storage/'.$data->foto)}}" width="150" height="150" style="object-fit:cover; border:1px solid #ddd; border-radius:4px;">
+                                @else
+                                -
+                                @endif
+                            </td>
+                        </tr>
+                        <tr>
                             <th>Nama</th>
                             <td>:</td>
                             <td>{{$data->nama}}</td>
@@ -42,9 +53,24 @@
                             <td>:</td>
                             <td>{{$data->jenis}}</td>
                         </tr>
+                        <tr>
+                            <th>Kategori</th>
+                            <td>:</td>
+                            <td>
+                                @forelse($data->kategoriItems as $kategori)
+                                <a href="{{url('kategori-items/view')}}/{{$kategori->kode}}">{{$kategori->nama}}</a>@if(!$loop->last), @endif
+                                @empty
+                                -
+                                @endforelse
+                            </td>
+                        </tr>
                     </table>
                     <a class="btn btn-info" href="{{url('master-items/form/edit')}}/{{$data->id}}">Edit</a>
-                    <a class="btn btn-danger" href="{{url('master-items/delete')}}/{{$data->id}}" onclick="return confirm('Are you sure you want to delete this item?');">Delete</a>
+                    <form method="POST" action="{{url('master-items/delete')}}/{{$data->id}}" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this item?');">
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit" class="btn btn-danger">Delete</button>
+                    </form>
                 </div>
             </div>
         </div>

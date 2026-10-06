@@ -12,10 +12,21 @@ class ExampleTest extends TestCase
      *
      * @return void
      */
-    public function test_the_application_returns_a_successful_response()
+    public function test_guest_is_redirected_to_login_from_home()
     {
         $response = $this->get('/');
 
-        $response->assertStatus(200);
+        $response->assertRedirect('/login');
+    }
+
+    public function test_authenticated_user_can_access_master_items()
+    {
+        $user = \App\Models\User::factory()->create([
+            'email' => 'test-' . uniqid() . '@example.com',
+        ]);
+
+        $response = $this->actingAs($user)->get('/master-items');
+
+        $response->assertOk();
     }
 }

@@ -3,7 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\MasterItem;
+use App\Models\KategoriItem;
+use App\Exports\MasterItemsExport;
+use App\Http\Requests\MasterItemRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
 
 class MasterItemsController extends Controller
 {
@@ -14,45 +19,94 @@ class MasterItemsController extends Controller
 
     public function search(Request $request)
     {
-        $kode = $request->kode;
-        $nama = $request->nama;
-        $hargamin = $request->hargamin;
-        $hargamax = $request->hargamax;
+        $start = (int) $request->input('start', 0);
+        $length = (int) $request->input('length', 10);
+        $orderDir = $request->input('order.0.dir', 'asc');
 
-        $data_search = MasterItem::query();
+        $query = MasterItem::query()->with('kategoriItems');
 
-        if (!empty($kode)) $data_search = $data_search->where('kode', $kode);
-        if (!empty($nama)) $data_search = $data_search->where('nama', 'LIKE', '%' . $nama . '%');
-        if (!empty($hargamin)) $data_search = $data_search->where('harga_beli', '>=', $hargamin)->where('harga_beli', '<=', $hargamax);
+        if (!empty($request->kode)) {
+            $query->where('kode', $request->kode);
+        }
+        if (!empty($request->nama)) {
+            $query->where('nama', 'LIKE', '%' . $request->nama . '%');
+        }
+        if ($request->filled('hargamin')) {
+            $query->where('harga_beli', '>=', (int) $request->hargamin);
+        }
+        if ($request->filled('hargamax')) {
+            $query->where('harga_beli', '<=', (int) $request->hargamax);
+        }
 
-        $data_search = $data_search->select('kode', 'nama', 'jenis', 'harga_beli', 'laba', 'supplier')->orderBy('id')->get();
+        $recordsTotal = MasterItem::count();
+        $recordsFiltered = (clone $query)->count();
 
+        $sortColumns = [
+            1 => 'kode',
+            2 => 'nama',
+            3 => 'jenis',
+            4 => 'harga_beli',
+            6 => 'supplier',
+        ];
+        $orderColumn = (int) $request->input('order.0.column', 1);
+        $query->orderBy($sortColumns[$orderColumn] ?? 'id', $orderDir === 'desc' ? 'desc' : 'asc');
 
-        return json_encode([
-            'status' => 200,
-            'data' => $data_search
+        $items = $query->offset($start)->limit($length)->get();
+
+        $data = $items->map(function ($item) {
+            $hargaJual = (int) round($item->harga_beli + $item->harga_beli * $item->laba / 100);
+
+            $fotoHtml = '-';
+            if ($item->foto) {
+                $fotoHtml = '<img src="' . e(asset('storage/' . $item->foto)) . '" width="60" height="60" style="object-fit:cover; border:1px solid #ddd; border-radius:4px;">';
+            }
+
+            $kategori = $item->kategoriItems->pluck('nama')->implode(', ');
+
+            $view = '<a href="' . e(url('master-items/view/' . $item->kode)) . '" class="btn btn-primary">View</a>';
+
+            return [
+                $fotoHtml,
+                e($item->kode),
+                e($item->nama),
+                e($item->jenis),
+                $item->harga_beli,
+                $hargaJual,
+                e($item->supplier),
+                e($kategori),
+                $view,
+            ];
+        })->toArray();
+
+        return response()->json([
+            'draw' => (int) $request->input('draw'),
+            'recordsTotal' => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data' => $data,
         ]);
     }
 
     public function formView($method, $id = 0)
     {
         if ($method == 'new') {
-            $item = [];
+            $item = null;
         } else {
-            $item = MasterItem::find($id);
+$item = MasterItem::with('kategoriItems')->find($id);
         }
         $data['item'] = $item;
         $data['method'] = $method;
+        $data['semuaKategori'] = KategoriItem::all();
+        $data['kategoriTerpilih'] = ($method != 'new' && $item != null) ? $item->kategoriItems->pluck('id')->toArray() : [];
         return view('master_items.form.index', $data);
     }
 
     public function singleView($kode)
     {
-        $data['data'] = MasterItem::where('kode', $kode)->first();
+        $data['data'] = MasterItem::where('kode', $kode)->with('kategoriItems')->first();
         return view('master_items.single.index', $data);
     }
 
-    public function formSubmit(Request $request, $method, $id = 0)
+    public function formSubmit(MasterItemRequest $request, $method, $id = 0)
     {
         if ($method == 'new') {
             $data_item = new MasterItem;
@@ -62,6 +116,9 @@ class MasterItemsController extends Controller
             sleep(3);
         } else {
             $data_item = MasterItem::find($id);
+            if ($data_item == null) {
+                abort(404);
+            }
             $kode = $data_item->kode;
         }
 
@@ -71,27 +128,51 @@ class MasterItemsController extends Controller
         $data_item->kode = $kode;
         $data_item->supplier = $request->supplier;
         $data_item->jenis = $request->jenis;
+
+        if ($request->hasFile('foto')) {
+            if ($data_item->foto != null) {
+                Storage::disk('public')->delete($data_item->foto);
+            }
+
+            $data_item->foto = $request->file('foto')->store('items', 'public');
+        }
+
         $data_item->save();
+
+        $data_item->kategoriItems()->sync($request->kategori ?? []);
 
         return redirect('master-items');
     }
 
     public function delete($id)
     {
-        MasterItem::find($id)->delete();
+        $item = MasterItem::find($id);
+
+        if ($item != null) {
+            if ($item->foto != null) {
+                Storage::disk('public')->delete($item->foto);
+            }
+
+            $item->delete();
+        }
+
         return redirect('master-items');
+    }
+
+    public function exportExcel()
+    {
+        return Excel::download(new MasterItemsExport, 'master-items.xlsx');
     }
 
     public function updateRandomData()
     {
         $data = MasterItem::get();
-        foreach($data as $item)
-        {
+        foreach ($data as $item) {
             $kode = $item->id;
             $kode = str_pad($kode, 5, '0', STR_PAD_LEFT);
 
-            $item->harga_beli = rand(100,1000000);
-            $item->laba = rand(10,99);
+            $item->harga_beli = rand(100, 1000000);
+            $item->laba = rand(10, 99);
             $item->kode = $kode;
             $item->supplier = $this->getRandomSupplier();
             $item->jenis = $this->getRandomJenis();
@@ -101,15 +182,15 @@ class MasterItemsController extends Controller
 
     private function getRandomSupplier()
     {
-        $array = ['Tokopaedi','Bukulapuk','TokoBagas','E Commurz','Blublu'];
-        $random = rand(0,4);
+        $array = ['Tokopaedi', 'Bukulapuk', 'TokoBagas', 'E Commurz', 'Blublu'];
+        $random = rand(0, 4);
         return $array[$random];
     }
 
     private function getRandomJenis()
     {
-        $array = ['Obat','Alkes','Matkes','Umum','ATK'];
-        $random = rand(0,4);
+        $array = ['Obat', 'Alkes', 'Matkes', 'Umum', 'ATK'];
+        $random = rand(0, 4);
         return $array[$random];
     }
 }

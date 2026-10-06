@@ -8,27 +8,19 @@
             processing: true,
             serverSide: true,
             searching: false,
-            order: [[1, 'desc']],
+            order: [[0, 'desc']],
             ajax: {
-                url: '{{url("master-items/search")}}',
+                url: '{{url("kategori-items/search")}}',
                 type: 'GET',
                 data: function(d) {
                     d.kode = $('#filter-kode').val();
                     d.nama = $('#filter-nama').val();
-                    d.hargamin = $('#filter-harga-min').val();
-                    d.hargamax = $('#filter-harga-max').val();
                 }
             },
             columns: [
-                { data: 0, orderable: false },
+                { data: 0 },
                 { data: 1 },
-                { data: 2 },
-                { data: 3 },
-                { data: 4 },
-                { data: 5 },
-                { data: 6 },
-                { data: 7, orderable: false },
-                { data: 8, orderable: false }
+                { data: 2, orderable: false }
             ]
         });
     });
